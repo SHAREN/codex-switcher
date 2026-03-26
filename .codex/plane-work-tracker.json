@@ -1,0 +1,31 @@
+{
+  "backend": "plane",
+  "plane": {
+    "base_url": "http://127.0.0.1:8081",
+    "api_key_env": "PLANE_API_KEY",
+    "workspace_slug": "test",
+    "project_id": "cd904ef0-79c3-4dd5-b32f-d973ff9fbdbf",
+    "project_identifier": "CSW",
+    "external_source": "codex.project-bug-tracker.codex-switcher",
+    "state_map": {
+      "backlog": "8632b40c-5012-4d39-9860-ef7e438546a1",
+      "todo": "73abde01-5b7f-4f2d-908e-6c639936eddf",
+      "open": "73abde01-5b7f-4f2d-908e-6c639936eddf",
+      "in progress": "1c6b3464-3886-41bd-8b41-3871aaf9c7a8",
+      "investigating": "1c6b3464-3886-41bd-8b41-3871aaf9c7a8",
+      "partially fixed": "1c6b3464-3886-41bd-8b41-3871aaf9c7a8",
+      "blocked": "73abde01-5b7f-4f2d-908e-6c639936eddf",
+      "done": "b3b84b51-3a54-492c-86bb-cbd2f128f3e2",
+      "fixed": "b3b84b51-3a54-492c-86bb-cbd2f128f3e2",
+      "cancelled": "3ba75fed-93e2-4482-b466-74231fee6514"
+    }
+  },
+  "repository": {
+    "root": "D:/RENAT/Documents/auth_choice",
+    "legacy_tracker_path": "BUG_TRACKER.md",
+    "session_root": "C:/Users/RENAT/.codex/sessions"
+  },
+  "defaults": {
+    "attach_documentation_files": false
+  }
+}
