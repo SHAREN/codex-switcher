@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useAccounts } from "./hooks/useAccounts";
 import { AccountCard, AddAccountModal, UpdateChecker } from "./components";
-import type { CodexProcessInfo } from "./types";
-import { exportFullBackupFile, importFullBackupFile } from "./lib/platform";
+import type { CodexActivityInfo, CodexProcessInfo } from "./types";
+import { exportFullBackupFile, importFullBackupFile, invokeBackend } from "./lib/platform";
 import "./App.css";
 
 type Theme = "light" | "dark";
@@ -49,6 +48,55 @@ function getInitialTheme(): Theme {
     : "light";
 }
 
+function getStoppedCodexActivity(): CodexActivityInfo {
+  return {
+    state: "idle",
+    conversation_id: null,
+    last_event_at: null,
+    summary: "Codex desktop app is not running.",
+  };
+}
+
+function getUnknownCodexActivity(summary: string): CodexActivityInfo {
+  return {
+    state: "unknown",
+    conversation_id: null,
+    last_event_at: null,
+    summary,
+  };
+}
+
+function formatCodexTimestamp(timestamp: string | null): string | null {
+  if (!timestamp) return null;
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function buildCodexActivityDetail(activity: CodexActivityInfo | null): string {
+  if (!activity) {
+    return "Polling recent desktop logs for unfinished Codex turns.";
+  }
+
+  const formattedTimestamp = formatCodexTimestamp(activity.last_event_at);
+  if (!formattedTimestamp) {
+    return activity.summary;
+  }
+
+  if (activity.state === "awaiting_approval" || activity.state === "busy") {
+    return `${activity.summary} Since ${formattedTimestamp}.`;
+  }
+
+  return `${activity.summary} Last event ${formattedTimestamp}.`;
+}
+
 function App() {
   const {
     accounts,
@@ -85,6 +133,9 @@ function App() {
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [processInfo, setProcessInfo] = useState<CodexProcessInfo | null>(null);
+  const [codexActivity, setCodexActivity] = useState<CodexActivityInfo | null>(null);
+  const [isStartingCodexApp, setIsStartingCodexApp] = useState(false);
+  const [isStoppingCodexApp, setIsStoppingCodexApp] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isExportingSlim, setIsExportingSlim] = useState(false);
   const [isImportingSlim, setIsImportingSlim] = useState(false);
@@ -127,16 +178,44 @@ function App() {
     });
   };
 
+  const syncCodexActivity = useCallback(async (info: CodexProcessInfo | null) => {
+    if (!info) {
+      setCodexActivity(null);
+      return null;
+    }
+
+    if (info.count === 0) {
+      const idleActivity = getStoppedCodexActivity();
+      setCodexActivity(idleActivity);
+      return idleActivity;
+    }
+
+    try {
+      const activity = await invokeBackend<CodexActivityInfo>("get_codex_activity");
+      setCodexActivity(activity);
+      return activity;
+    } catch (err) {
+      console.error("Failed to inspect Codex activity:", err);
+      const fallback = getUnknownCodexActivity(
+        "Codex desktop is running, but the live turn state could not be inferred."
+      );
+      setCodexActivity(fallback);
+      return fallback;
+    }
+  }, []);
+
   const checkProcesses = useCallback(async () => {
     try {
-      const info = await invoke<CodexProcessInfo>("check_codex_processes");
+      const info = await invokeBackend<CodexProcessInfo>("check_codex_processes");
       setProcessInfo(info);
+      await syncCodexActivity(info);
       return info;
     } catch (err) {
       console.error("Failed to check processes:", err);
+      setCodexActivity(null);
       return null;
     }
-  }, []);
+  }, [syncCodexActivity]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -245,6 +324,45 @@ function App() {
       return JSON.stringify(err);
     } catch {
       return "Unknown error";
+    }
+  };
+
+  const handleStartCodexApp = async () => {
+    try {
+      setIsStartingCodexApp(true);
+      const info = await invokeBackend<CodexProcessInfo>("start_codex_app");
+      setProcessInfo(info);
+      await syncCodexActivity(info);
+      showWarmupToast(
+        info.count > 0 ? "Codex app launch requested." : "Codex app is not running."
+      );
+    } catch (err) {
+      console.error("Failed to start Codex app:", err);
+      showWarmupToast(`Failed to start Codex app: ${formatWarmupError(err)}`, true);
+    } finally {
+      setIsStartingCodexApp(false);
+    }
+  };
+
+  const handleStopCodexApp = async () => {
+    const runningCount = processInfo?.count ?? 0;
+
+    try {
+      setIsStoppingCodexApp(true);
+      const info = await invokeBackend<CodexProcessInfo>("stop_codex_app");
+      setProcessInfo(info);
+      await syncCodexActivity(info);
+      showWarmupToast(
+        runningCount > 0
+          ? `Stopped ${runningCount} Codex app instance${runningCount === 1 ? "" : "s"}.`
+          : "Codex app is already stopped."
+      );
+    } catch (err) {
+      console.error("Failed to stop Codex app:", err);
+      showWarmupToast(`Failed to stop Codex app: ${formatWarmupError(err)}`, true);
+      await checkProcesses();
+    } finally {
+      setIsStoppingCodexApp(false);
     }
   };
 
@@ -382,7 +500,52 @@ function App() {
 
   const activeAccount = accounts.find((account) => account.is_active);
   const otherAccounts = accounts.filter((account) => !account.is_active);
-  const hasRunningProcesses = processInfo && processInfo.count > 0;
+  const hasRunningProcesses = (processInfo?.count ?? 0) > 0;
+  const isChangingCodexAppState = isStartingCodexApp || isStoppingCodexApp;
+  const canLaunchCodexApp = !hasRunningProcesses && !isChangingCodexAppState;
+  const canStopCodexApp = hasRunningProcesses && !isChangingCodexAppState;
+  const codexProcessText = processInfo
+    ? hasRunningProcesses
+      ? `${processInfo.count} Codex app instance${processInfo.count === 1 ? "" : "s"} running`
+      : "Codex app stopped"
+    : "Checking Codex app status...";
+  const codexProcessDetail = processInfo
+    ? hasRunningProcesses
+      ? "Switching remains blocked while a Codex desktop window is open."
+      : "Safe to replace the active account remotely."
+    : "Polling for active Codex desktop processes.";
+  const codexProcessChipClass = hasRunningProcesses
+    ? "theme-status-chip--warning"
+    : "theme-status-chip--success";
+  const codexProcessDotColor = hasRunningProcesses
+    ? "var(--theme-warning-text)"
+    : "var(--theme-success-text)";
+  const codexActivityState = codexActivity?.state ?? (hasRunningProcesses ? "unknown" : "idle");
+  const codexActivityChipClass =
+    codexActivityState === "idle"
+      ? "theme-status-chip--success"
+      : codexActivityState === "unknown"
+        ? ""
+        : "theme-status-chip--warning";
+  const codexActivityDotColor =
+    codexActivityState === "idle"
+      ? "var(--theme-success-text)"
+      : codexActivityState === "unknown"
+        ? "var(--theme-text-secondary)"
+        : "var(--theme-warning-text)";
+  const codexActivityText =
+    !processInfo && !codexActivity
+      ? "Checking activity..."
+      : !hasRunningProcesses
+        ? "Codex stopped"
+        : codexActivityState === "awaiting_approval"
+        ? "Approval needed"
+          : codexActivityState === "busy"
+            ? "AI busy"
+            : codexActivityState === "idle"
+              ? "AI idle"
+              : "Activity unknown";
+  const codexActivityDetail = buildCodexActivityDetail(codexActivity);
 
   const sortedOtherAccounts = useMemo(() => {
     const getResetDeadline = (resetAt: number | null | undefined) =>
@@ -464,25 +627,13 @@ function App() {
                   </h1>
                   {processInfo && (
                     <span
-                      className={`theme-status-chip inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${
-                        hasRunningProcesses
-                          ? "theme-status-chip--warning"
-                          : "theme-status-chip--success"
-                      }`}
+                      className={`theme-status-chip inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${codexProcessChipClass}`.trim()}
                     >
                       <span
                         className="h-1.5 w-1.5 rounded-full"
-                        style={{
-                          backgroundColor: hasRunningProcesses
-                            ? "var(--theme-warning-text)"
-                            : "var(--theme-success-text)",
-                        }}
+                        style={{ backgroundColor: codexProcessDotColor }}
                       />
-                      <span>
-                        {hasRunningProcesses
-                          ? `${processInfo.count} Codex running`
-                          : "0 Codex running"}
-                      </span>
+                      <span>{codexProcessText}</span>
                     </span>
                   )}
                 </div>
@@ -647,6 +798,78 @@ function App() {
           </div>
         </div>
       </header>
+
+      <div className="mx-auto max-w-5xl px-6 pt-6">
+        <section className={`${panelClass} rounded-3xl px-5 py-4`}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  Codex App
+                </h2>
+                <span
+                  className={`theme-status-chip inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${codexActivityChipClass}`.trim()}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: codexActivityDotColor }}
+                  />
+                  <span>{codexActivityText}</span>
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                {codexActivityDetail}
+              </p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {codexProcessDetail}
+              </p>
+              {codexActivity?.conversation_id &&
+                hasRunningProcesses &&
+                codexActivity.state !== "idle" && (
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Conversation: {codexActivity.conversation_id}
+                  </p>
+                )}
+              {processInfo && processInfo.pids.length > 0 && (
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Active root PIDs: {processInfo.pids.join(", ")}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => {
+                  void handleStartCodexApp();
+                }}
+                disabled={!canLaunchCodexApp}
+                className={primaryButtonClass}
+                title={
+                  hasRunningProcesses
+                    ? "Codex app is already running"
+                    : "Launch the Codex desktop app"
+                }
+              >
+                {isStartingCodexApp ? "Launching..." : "Launch Codex"}
+              </button>
+              <button
+                onClick={() => {
+                  void handleStopCodexApp();
+                }}
+                disabled={!canStopCodexApp}
+                className={warningButtonClass}
+                title={
+                  hasRunningProcesses
+                    ? "Stop all running Codex app windows"
+                    : "Codex app is already stopped"
+                }
+              >
+                {isStoppingCodexApp ? "Stopping..." : "Stop Codex"}
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
 
       <main className="mx-auto max-w-5xl px-6 py-8">
         {loading && accounts.length === 0 ? (

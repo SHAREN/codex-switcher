@@ -28,6 +28,12 @@ export interface UsageInfo {
   error: string | null;
 }
 
+export interface CachedUsageInfo {
+  account_id: string;
+  usage: UsageInfo;
+  updated_at: string;
+}
+
 export interface OAuthLoginInfo {
   auth_url: string;
   callback_port: number;
@@ -36,6 +42,7 @@ export interface OAuthLoginInfo {
 export interface AccountWithUsage extends AccountInfo {
   usage?: UsageInfo;
   usageLoading?: boolean;
+  usageUpdatedAt?: string | null;
 }
 
 export interface CodexProcessInfo {
@@ -43,6 +50,19 @@ export interface CodexProcessInfo {
   background_count: number;
   can_switch: boolean;
   pids: number[];
+}
+
+export type CodexActivityState =
+  | "unknown"
+  | "idle"
+  | "busy"
+  | "awaiting_approval";
+
+export interface CodexActivityInfo {
+  state: CodexActivityState;
+  conversation_id: string | null;
+  last_event_at: string | null;
+  summary: string;
 }
 
 export interface WarmupSummary {

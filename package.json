@@ -8,7 +8,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "test:sync-order": "node --import tsx --test tests/otherAccountsOrder.test.ts tests/syncOrder.api.test.ts",
+    "test:sync-order:ui": "node scripts/test-sync-order-ui.mjs",
+    "tauri": "tauri",
+    "lan": "pnpm build && cargo build --manifest-path src-tauri/Cargo.toml --bin codex-web && node scripts/lan.mjs",
+    "lan:backend": "pnpm build && cargo run --manifest-path src-tauri/Cargo.toml --bin codex-web"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.0",
@@ -25,7 +29,9 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "playwright-core": "^1.58.2",
     "tailwindcss": "^4.1.18",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }

@@ -4,13 +4,15 @@ pub mod api;
 pub mod auth;
 pub mod commands;
 pub mod types;
+pub mod web;
 
 use commands::{
     add_account_from_file, cancel_login, check_codex_processes, complete_login, delete_account,
     export_accounts_full_encrypted_file, export_accounts_slim_text, get_active_account_info,
-    get_masked_account_ids, get_usage, import_accounts_full_encrypted_file,
-    import_accounts_slim_text, list_accounts, refresh_all_accounts_usage, rename_account,
-    set_masked_account_ids, start_login, switch_account, sync_live_auth, warmup_account,
+    get_cached_usage, get_codex_activity, get_masked_account_ids, get_usage,
+    import_accounts_full_encrypted_file, import_accounts_slim_text, list_accounts,
+    refresh_all_accounts_usage, rename_account, set_masked_account_ids, start_codex_app,
+    start_login, stop_codex_app, switch_account, sync_live_auth, warmup_account,
     warmup_all_accounts,
 };
 
@@ -47,12 +49,16 @@ pub fn run() {
             complete_login,
             cancel_login,
             // Usage
+            get_cached_usage,
             get_usage,
             refresh_all_accounts_usage,
             warmup_account,
             warmup_all_accounts,
             // Process detection
             check_codex_processes,
+            get_codex_activity,
+            start_codex_app,
+            stop_codex_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

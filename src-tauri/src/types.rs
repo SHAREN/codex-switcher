@@ -240,6 +240,36 @@ impl UsageInfo {
     }
 }
 
+/// Cached usage entry persisted to disk for stale-while-refresh UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedUsageEntry {
+    pub account_id: String,
+    pub usage: UsageInfo,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// On-disk usage cache structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageCacheStore {
+    #[serde(default = "default_usage_cache_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub entries: Vec<CachedUsageEntry>,
+}
+
+impl Default for UsageCacheStore {
+    fn default() -> Self {
+        Self {
+            version: default_usage_cache_version(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+fn default_usage_cache_version() -> u32 {
+    1
+}
+
 /// Warm-up execution summary across accounts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WarmupSummary {

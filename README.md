@@ -37,11 +37,41 @@ pnpm install
 # Run in development mode
 pnpm tauri dev
 
+# Run the LAN web dashboard
+pnpm lan
+
 # Build for production
 pnpm tauri build
 ```
 
 The built application will be in `src-tauri/target/release/bundle/`.
+
+The LAN web dashboard listens on `0.0.0.0:3210` by default, so it can be opened from other devices on your local network using `http://<your-pc-ip>:3210`.
+
+`pnpm lan` starts:
+- a Node LAN proxy on `0.0.0.0:3210`
+- the Rust backend on `127.0.0.1:3211`
+
+This avoids Windows Firewall blocking the Rust binary directly while keeping the same web UI and API.
+
+### Windows watchdog launcher
+
+If you need the LAN dashboard to stay online for Traefik or other remote access, start it through `scripts/start-switcher.cmd` instead of running `pnpm lan` manually.
+
+The watchdog launcher:
+- starts `pnpm lan`
+- checks `http://127.0.0.1:3210/api/health`
+- restarts the process tree if it exits or fails health checks repeatedly
+- writes logs to `.tmp/start-switcher.watchdog.log`, `.tmp/start-switcher.stdout.log`, and `.tmp/start-switcher.stderr.log`
+
+Optional environment variables:
+- `CODEX_SWITCHER_WATCHDOG_URL`
+- `CODEX_SWITCHER_WATCHDOG_INTERVAL_SEC`
+- `CODEX_SWITCHER_WATCHDOG_RESTART_DELAY_SEC`
+- `CODEX_SWITCHER_WATCHDOG_STARTUP_GRACE_SEC`
+- `CODEX_SWITCHER_WATCHDOG_MAX_FAILURES`
+
+Note: ChatGPT OAuth login still requires opening the generated link on the host PC itself because OpenAI redirects back to `localhost`.
 
 ## Disclaimer
 
