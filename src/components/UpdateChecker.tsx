@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import type { Update } from "@tauri-apps/plugin-updater";
+import { isTauriRuntime } from "../lib/platform";
 
 type UpdateStatus =
   | { kind: "idle" }
@@ -20,9 +20,12 @@ export function UpdateChecker() {
   const [dismissed, setDismissed] = useState(false);
 
   const checkForUpdate = useCallback(async () => {
+    if (!isTauriRuntime()) return;
+
     try {
       setStatus({ kind: "checking" });
       setDismissed(false);
+      const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
       setStatus(update ? { kind: "available", update } : { kind: "idle" });
     } catch (err) {
@@ -32,6 +35,7 @@ export function UpdateChecker() {
   }, []);
 
   useEffect(() => {
+    if (!isTauriRuntime()) return;
     void checkForUpdate();
   }, [checkForUpdate]);
 
@@ -39,6 +43,7 @@ export function UpdateChecker() {
     if (status.kind !== "available") return;
 
     try {
+      if (!isTauriRuntime()) return;
       let downloaded = 0;
       let total: number | null = null;
 
@@ -68,11 +73,17 @@ export function UpdateChecker() {
 
   const handleRelaunch = async () => {
     try {
+      if (!isTauriRuntime()) return;
+      const { relaunch } = await import("@tauri-apps/plugin-process");
       await relaunch();
     } catch (err) {
       console.error("Relaunch failed:", err);
     }
   };
+
+  if (!isTauriRuntime()) {
+    return null;
+  }
 
   if (status.kind === "idle" || status.kind === "checking" || dismissed) {
     return null;

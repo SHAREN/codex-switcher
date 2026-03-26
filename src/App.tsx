@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { useAccounts } from "./hooks/useAccounts";
 import { AccountCard, AddAccountModal, UpdateChecker } from "./components";
 import type { CodexProcessInfo } from "./types";
+import { exportFullBackupFile, importFullBackupFile } from "./lib/platform";
 import "./App.css";
 
 type Theme = "light" | "dark";
@@ -54,6 +54,7 @@ function App() {
     accounts,
     loading,
     error,
+    loadAccounts,
     syncLiveAuth,
     refreshUsage,
     refreshSingleUsage,
@@ -65,8 +66,6 @@ function App() {
     importFromFile,
     exportAccountsSlimText,
     importAccountsSlimText,
-    exportAccountsFullEncryptedFile,
-    importAccountsFullEncryptedFile,
     startOAuthLogin,
     completeOAuthLogin,
     cancelOAuthLogin,
@@ -350,14 +349,8 @@ function App() {
   const handleExportFullFile = async () => {
     try {
       setIsExportingFull(true);
-      const selected = await save({
-        title: "Export Full Encrypted Account Config",
-        defaultPath: "codex-switcher-full.cswf",
-        filters: [{ name: "Codex Switcher Full Backup", extensions: ["cswf"] }],
-      });
-
-      if (!selected) return;
-      await exportAccountsFullEncryptedFile(selected);
+      const exported = await exportFullBackupFile();
+      if (!exported) return;
       showWarmupToast("Full encrypted file exported.");
     } catch (err) {
       console.error("Failed to export full encrypted file:", err);
@@ -370,15 +363,12 @@ function App() {
   const handleImportFullFile = async () => {
     try {
       setIsImportingFull(true);
-      const selected = await open({
-        multiple: false,
-        title: "Import Full Encrypted Account Config",
-        filters: [{ name: "Codex Switcher Full Backup", extensions: ["cswf"] }],
-      });
-
-      if (!selected || Array.isArray(selected)) return;
-      const summary = await importAccountsFullEncryptedFile(selected);
-      setMaskedAccounts(new Set());
+      const summary = await importFullBackupFile();
+      if (!summary) return;
+      const accountList = await loadAccounts();
+      await refreshUsage(accountList);
+      const maskedIds = await loadMaskedAccountIds();
+      setMaskedAccounts(new Set(maskedIds));
       showWarmupToast(
         `Imported ${summary.imported_count}, skipped ${summary.skipped_count} (total ${summary.total_in_payload})`
       );
