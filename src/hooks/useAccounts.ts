@@ -3,11 +3,23 @@ import type {
   AccountInfo,
   UsageInfo,
   AccountWithUsage,
+  CachedUsageInfo,
   WarmupSummary,
   ImportAccountsSummary,
   LiveAuthSyncResult,
 } from "../types";
 import { invokeBackend, type FileSource } from "../lib/platform";
+import {
+  applyUsageFetchError,
+  applyUsageFetchResult,
+  filterCachedUsageEntries,
+  loadCachedUsageFromBrowser,
+  markAccountsUsageLoading,
+  mergeCachedUsageEntries,
+  mergeAccountsWithCachedUsage,
+  persistCachedUsageToBrowser,
+  saveCachedUsageToBrowser,
+} from "../lib/usageCache";
 
 export function useAccounts() {
   const [accounts, setAccounts] = useState<AccountWithUsage[]>([]);
@@ -63,23 +75,25 @@ export function useAccounts() {
     try {
       setLoading(true);
       setError(null);
-      const accountList = await invokeBackend<AccountInfo[]>("list_accounts");
-      
-      if (preserveUsage) {
-        // Preserve existing usage data when just updating account info
-        setAccounts((prev) => {
-          const usageMap = new Map(
-            prev.map((a) => [a.id, { usage: a.usage, usageLoading: a.usageLoading }])
-          );
-          return accountList.map((a) => ({
-            ...a,
-            usage: usageMap.get(a.id)?.usage,
-            usageLoading: usageMap.get(a.id)?.usageLoading,
-          }));
-        });
-      } else {
-        setAccounts(accountList.map((a) => ({ ...a, usageLoading: false })));
-      }
+      const browserCachedUsage = loadCachedUsageFromBrowser();
+      const [accountList, cachedUsage] = await Promise.all([
+        invokeBackend<AccountInfo[]>("list_accounts"),
+        invokeBackend<CachedUsageInfo[]>("get_cached_usage").catch((err) => {
+          console.error("Failed to load cached usage:", err);
+          return [];
+        }),
+      ]);
+      const accountIdSet = new Set(accountList.map((account) => account.id));
+      const mergedCachedUsage = filterCachedUsageEntries(
+        mergeCachedUsageEntries(cachedUsage, browserCachedUsage),
+        accountIdSet
+      );
+
+      persistCachedUsageToBrowser(mergedCachedUsage);
+
+      setAccounts((prev) =>
+        mergeAccountsWithCachedUsage(accountList, prev, mergedCachedUsage, preserveUsage)
+      );
       return accountList;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -107,22 +121,16 @@ export function useAccounts() {
 
   const refreshUsage = useCallback(
     async (accountList?: AccountInfo[] | AccountWithUsage[]) => {
-    try {
-      const list = accountList ?? accountsRef.current;
-      if (list.length === 0) {
-        return;
-      }
+      try {
+        const list = accountList ?? accountsRef.current;
+        if (list.length === 0) {
+          return;
+        }
 
-      const accountIds = list.map((account) => account.id);
-      const accountIdSet = new Set(accountIds);
+        const accountIds = list.map((account) => account.id);
+        const accountIdSet = new Set(accountIds);
 
-      setAccounts((prev) =>
-        prev.map((account) =>
-          accountIdSet.has(account.id)
-            ? { ...account, usageLoading: true }
-            : account
-        )
-      );
+        setAccounts((prev) => markAccountsUsageLoading(prev, accountIdSet));
 
         await runWithConcurrency(
           accountIds,
@@ -132,35 +140,37 @@ export function useAccounts() {
                 accountId,
                 account_id: accountId,
               });
+              const updatedAt = new Date().toISOString();
+              if (!usage.error) {
+                saveCachedUsageToBrowser({
+                  account_id: accountId,
+                  usage,
+                  updated_at: updatedAt,
+                });
+              }
+              setAccounts((prev) => applyUsageFetchResult(prev, accountId, usage, updatedAt));
+            } catch (err) {
+              console.error("Failed to refresh usage:", err);
+              const message = err instanceof Error ? err.message : String(err);
               setAccounts((prev) =>
-                prev.map((account) =>
-                  account.id === accountId
-                  ? { ...account, usage, usageLoading: false }
-                  : account
-              )
-            );
-          } catch (err) {
-            console.error("Failed to refresh usage:", err);
-            const message = err instanceof Error ? err.message : String(err);
-            setAccounts((prev) =>
-              prev.map((account) =>
-                account.id === accountId
-                  ? {
-                      ...account,
-                      usage: buildUsageError(accountId, message, account.plan_type ?? null),
-                      usageLoading: false,
-                    }
-                  : account
-              )
-            );
-          }
-        },
-        maxConcurrentUsageRequests
-      );
-    } catch (err) {
-      console.error("Failed to refresh usage:", err);
-      throw err;
-    }
+                applyUsageFetchError(
+                  prev,
+                  accountId,
+                  buildUsageError(
+                    accountId,
+                    message,
+                    prev.find((account) => account.id === accountId)?.plan_type ?? null
+                  )
+                )
+              );
+            }
+          },
+          maxConcurrentUsageRequests
+        );
+      } catch (err) {
+        console.error("Failed to refresh usage:", err);
+        throw err;
+      }
     },
     [buildUsageError, maxConcurrentUsageRequests, runWithConcurrency]
   );
@@ -176,28 +186,32 @@ export function useAccounts() {
         accountId,
         account_id: accountId,
       });
-      setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === accountId ? { ...a, usage, usageLoading: false } : a
-        )
-      );
+      const updatedAt = new Date().toISOString();
+      if (!usage.error) {
+        saveCachedUsageToBrowser({
+          account_id: accountId,
+          usage,
+          updated_at: updatedAt,
+        });
+      }
+      setAccounts((prev) => applyUsageFetchResult(prev, accountId, usage, updatedAt));
     } catch (err) {
       console.error("Failed to refresh single usage:", err);
       const message = err instanceof Error ? err.message : String(err);
       setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === accountId
-            ? {
-                ...a,
-                usage: buildUsageError(accountId, message, a.plan_type ?? null),
-                usageLoading: false,
-              }
-            : a
+        applyUsageFetchError(
+          prev,
+          accountId,
+          buildUsageError(
+            accountId,
+            message,
+            prev.find((account) => account.id === accountId)?.plan_type ?? null
+          )
         )
       );
       throw err;
     }
-  }, []);
+  }, [buildUsageError]);
 
   const warmupAccount = useCallback(async (accountId: string) => {
     try {

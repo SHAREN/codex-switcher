@@ -47,6 +47,10 @@
   --theme-progress-good: #7a8f7d;
   --theme-progress-warn: #b18d5f;
   --theme-progress-danger: #b26d73;
+  --theme-loading-track: #d6dee8;
+  --theme-loading-text: #7d8999;
+  --theme-loading-text-soft: #a5aeb9;
+  --theme-loading-sheen: rgba(255, 255, 255, 0.28);
 
   --theme-selected-bg: #edf1f6;
   --theme-selected-text: #11151b;
@@ -109,10 +113,47 @@ html.dark {
   --theme-progress-good: #7e9383;
   --theme-progress-warn: #b99967;
   --theme-progress-danger: #b56e74;
+  --theme-loading-track: #1e2632;
+  --theme-loading-text: #7f8a99;
+  --theme-loading-text-soft: #a5afbd;
+  --theme-loading-sheen: rgba(255, 255, 255, 0.16);
 
   --theme-selected-bg: rgba(215, 220, 227, 0.08);
   --theme-selected-text: #e7ebf0;
   --theme-focus-ring: 0 0 0 3px rgba(215, 220, 227, 0.14);
+}
+
+@keyframes theme-loading-shimmer {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 0.12;
+  }
+
+  55% {
+    opacity: 0.48;
+  }
+
+  100% {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+
+@keyframes theme-loading-copy {
+  0%,
+  100% {
+    color: var(--theme-loading-text);
+    opacity: 0.82;
+  }
+
+  50% {
+    color: var(--theme-loading-text-soft);
+    opacity: 0.98;
+  }
 }
 
 body {
@@ -318,6 +359,10 @@ html.dark .theme-card--active {
   background-color: var(--theme-track);
 }
 
+.theme-progress-track--loading {
+  background-color: var(--theme-loading-track);
+}
+
 .theme-progress-fill--good {
   background-color: var(--theme-progress-good);
 }
@@ -328,6 +373,33 @@ html.dark .theme-card--active {
 
 .theme-progress-fill--danger {
   background-color: var(--theme-progress-danger);
+}
+
+.theme-progress-fill--loading {
+  opacity: 0.6;
+  filter: saturate(0.7);
+}
+
+.theme-progress-fill--loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--theme-loading-sheen) 48%,
+    transparent 100%
+  );
+  animation: theme-loading-shimmer 1.55s ease-in-out infinite;
+}
+
+.theme-loading-copy {
+  animation: theme-loading-copy 1.7s ease-in-out infinite;
+}
+
+.theme-loading-copy--muted {
+  color: var(--theme-loading-text);
 }
 
 .theme-select-button {

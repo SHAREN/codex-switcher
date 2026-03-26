@@ -58,12 +58,10 @@ export function AccountCard({
   onToggleMask,
 }: AccountCardProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(
-    account.usage && !account.usage.error ? new Date() : null
-  );
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(account.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  const lastRefresh = account.usageUpdatedAt ? new Date(account.usageUpdatedAt) : null;
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -76,7 +74,6 @@ export function AccountCard({
     setIsRefreshing(true);
     try {
       await onRefresh();
-      setLastRefresh(new Date());
     } finally {
       setIsRefreshing(false);
     }
