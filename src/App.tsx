@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAccounts } from "./hooks/useAccounts";
 import { AccountCard, AddAccountModal, UpdateChecker } from "./components";
-import type { CodexActivityInfo, CodexProcessInfo } from "./types";
+import type { AccountWithUsage, CodexActivityInfo, CodexProcessInfo } from "./types";
+import {
+  areOtherAccountsLoading,
+  getOrderedOtherAccountIds,
+  type OtherAccountsSort,
+} from "./lib/otherAccountsOrder";
 import { exportFullBackupFile, importFullBackupFile, invokeBackend } from "./lib/platform";
 import "./App.css";
 
 type Theme = "light" | "dark";
-type OtherAccountsSort =
-  | "deadline_asc"
-  | "deadline_desc"
-  | "remaining_desc"
-  | "remaining_asc";
 
 const THEME_STORAGE_KEY = "codex-switcher-theme";
 const OTHER_ACCOUNTS_SORT_OPTIONS: Array<{ value: OtherAccountsSort; label: string }> = [
@@ -150,10 +150,12 @@ function App() {
   } | null>(null);
   const [maskedAccounts, setMaskedAccounts] = useState<Set<string>>(new Set());
   const [otherAccountsSort, setOtherAccountsSort] = useState<OtherAccountsSort>("deadline_asc");
+  const [otherAccountsOrder, setOtherAccountsOrder] = useState<string[]>([]);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
+  const appliedOtherAccountsSortRef = useRef<OtherAccountsSort | null>(null);
 
   const toggleMask = (accountId: string) => {
     setMaskedAccounts((prev) => {
@@ -547,52 +549,64 @@ function App() {
               : "Activity unknown";
   const codexActivityDetail = buildCodexActivityDetail(codexActivity);
 
-  const sortedOtherAccounts = useMemo(() => {
-    const getResetDeadline = (resetAt: number | null | undefined) =>
-      resetAt ?? Number.POSITIVE_INFINITY;
-    const getRemainingPercent = (usedPercent: number | null | undefined) =>
-      usedPercent === null || usedPercent === undefined
-        ? Number.NEGATIVE_INFINITY
-        : Math.max(0, 100 - usedPercent);
+  const otherAccountsStructureSignature = useMemo(
+    () =>
+      [...otherAccounts]
+        .map((account) => `${account.id}:${account.name}:${account.is_active ? "1" : "0"}`)
+        .sort()
+        .join("|"),
+    [otherAccounts]
+  );
 
-    return [...otherAccounts].sort((a, b) => {
-      if (
-        otherAccountsSort === "deadline_asc" ||
-        otherAccountsSort === "deadline_desc"
-      ) {
-        const deadlineDiff =
-          getResetDeadline(a.usage?.primary_resets_at) -
-          getResetDeadline(b.usage?.primary_resets_at);
-        if (deadlineDiff !== 0) {
-          return otherAccountsSort === "deadline_asc"
-            ? deadlineDiff
-            : -deadlineDiff;
-        }
+  useEffect(() => {
+    if (otherAccounts.length === 0) {
+      setOtherAccountsOrder([]);
+      return;
+    }
 
-        const remainingDiff =
-          getRemainingPercent(b.usage?.primary_used_percent) -
-          getRemainingPercent(a.usage?.primary_used_percent);
-        if (remainingDiff !== 0) return remainingDiff;
-        return a.name.localeCompare(b.name);
-      }
+    setOtherAccountsOrder((currentOrder) => {
+      const currentIds = new Set(otherAccounts.map((account) => account.id));
+      const retainedIds = currentOrder.filter((id) => currentIds.has(id));
+      const retainedIdSet = new Set(retainedIds);
+      const appendedIds = otherAccounts
+        .map((account) => account.id)
+        .filter((id) => !retainedIdSet.has(id));
 
-      const remainingDiff =
-        getRemainingPercent(b.usage?.primary_used_percent) -
-        getRemainingPercent(a.usage?.primary_used_percent);
-      if (otherAccountsSort === "remaining_desc" && remainingDiff !== 0) {
-        return remainingDiff;
-      }
-      if (otherAccountsSort === "remaining_asc" && remainingDiff !== 0) {
-        return -remainingDiff;
-      }
-
-      const deadlineDiff =
-        getResetDeadline(a.usage?.primary_resets_at) -
-        getResetDeadline(b.usage?.primary_resets_at);
-      if (deadlineDiff !== 0) return deadlineDiff;
-      return a.name.localeCompare(b.name);
+      return [...retainedIds, ...appendedIds];
     });
-  }, [otherAccounts, otherAccountsSort]);
+  }, [otherAccountsStructureSignature]);
+
+  useEffect(() => {
+    const sortChanged = appliedOtherAccountsSortRef.current !== otherAccountsSort;
+    const needsInitialOrder = otherAccounts.length > 0 && otherAccountsOrder.length === 0;
+
+    if (!sortChanged && !needsInitialOrder) {
+      return;
+    }
+
+    if (areOtherAccountsLoading(otherAccounts)) {
+      return;
+    }
+
+    setOtherAccountsOrder(getOrderedOtherAccountIds(otherAccounts, otherAccountsSort));
+    appliedOtherAccountsSortRef.current = otherAccountsSort;
+  }, [otherAccounts, otherAccountsOrder.length, otherAccountsSort]);
+
+  const sortedOtherAccounts = useMemo(() => {
+    const accountMap = new Map(otherAccounts.map((account) => [account.id, account]));
+    const orderedIds =
+      otherAccountsOrder.length === otherAccounts.length
+        ? otherAccountsOrder
+        : getOrderedOtherAccountIds(otherAccounts, otherAccountsSort);
+    const orderedAccounts = orderedIds
+      .map((id) => accountMap.get(id))
+      .filter((account): account is AccountWithUsage => Boolean(account));
+
+    const orderedIdSet = new Set(orderedAccounts.map((account) => account.id));
+    const appendedAccounts = otherAccounts.filter((account) => !orderedIdSet.has(account.id));
+
+    return [...orderedAccounts, ...appendedAccounts];
+  }, [otherAccounts, otherAccountsOrder, otherAccountsSort]);
 
   const selectedSortLabel =
     OTHER_ACCOUNTS_SORT_OPTIONS.find((option) => option.value === otherAccountsSort)?.label ??
